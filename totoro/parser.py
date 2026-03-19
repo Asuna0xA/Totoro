@@ -82,15 +82,51 @@ class ConstraintParser:
     def _parse_rhs(self, target: str, rhs: str) -> ParsedConstraint:
         rhs = rhs.strip()
 
+        func_with_add_match = re.match(r'(\w+)\s*\(\s*(\[?.*?\]?)\s*\)\s*\+\s*(.+)$', rhs)
+        if func_with_add_match:
+            func_name = func_with_add_match.group(1)
+            inner_arg = func_with_add_match.group(2)
+            add_part = func_with_add_match.group(3)
+            base_constraint = self._parse_function(target, func_name, inner_arg)
+            add_operand = self._parse_operand(add_part.strip())
+            imm = None
+            if add_operand.kind == 'immediate':
+                imm = add_operand.value
+            return ParsedConstraint(
+                target=target,
+                operation=OperationType.ADD,
+                source1=base_constraint.source1,
+                immediate=imm
+            )
+
+        func_match = re.match(r'(\w+)\s*\(\s*(.+?)\s*\)\s*$', rhs)
+        if func_match:
+            func_name = func_match.group(1)
+            arg = func_match.group(2)
+            if func_name.lower() in ('lea', 'xor'):
+                if '-' in arg:
+                    parts = arg.split('-', 1)
+                    if len(parts) == 2:
+                        src1 = self._parse_operand(parts[0].strip())
+                        src2 = self._parse_operand(parts[1].strip())
+                        imm = None
+                        if src2.kind == 'immediate':
+                            imm = -src2.value
+                            src2 = None
+                        return ParsedConstraint(
+                            target=target,
+                            operation=OperationType.LEA if func_name.lower() == 'lea' else OperationType.XOR,
+                            source1=src1,
+                            source2=src2,
+                            immediate=imm
+                        )
+            return self._parse_function(target, func_name, arg)
+
         if '+' in rhs:
             return self._parse_addition(target, rhs)
 
         if '-' in rhs:
             return self._parse_subtraction(target, rhs)
-
-        func_match = re.match(r'(\w+)\s*\(\s*(.+?)\s*\)\s*$', rhs)
-        if func_match:
-            return self._parse_function(target, func_match.group(1), func_match.group(2))
 
         return self._parse_simple(target, rhs)
 
@@ -156,7 +192,10 @@ class ConstraintParser:
         else:
             raise ParseError(f"Unknown function: {func_name}")
 
-        operand = self._parse_operand(arg)
+        if func_name in ('read', 'write'):
+            operand = self._parse_memory_operand(arg)
+        else:
+            operand = self._parse_operand(arg)
 
         return ParsedConstraint(
             target=target,
@@ -219,6 +258,42 @@ class ConstraintParser:
         token = token.lower().strip()
         return bool(re.match(r'^' + self.REGISTER_PATTERN + r'$', token))
 
+    def _parse_memory_operand(self, arg: str) -> ConstraintOperand:
+        arg = arg.strip()
+        if self._is_register(arg):
+            return ConstraintOperand(kind='memory', value=arg.lower())
+        mem_match = re.match(r'\[([^\]]+)\]', arg)
+        if mem_match:
+            inner = mem_match.group(1).strip()
+            parts = inner.split('+')
+            base = parts[0].strip()
+            offset = 0
+            if len(parts) > 1:
+                try:
+                    offset_str = parts[1].strip()
+                    if offset_str.startswith('0x'):
+                        offset = int(offset_str, 16)
+                    else:
+                        offset = int(offset_str)
+                except ValueError:
+                    pass
+            return ConstraintOperand(kind='memory', value=base, offset=offset)
+        if '+' in arg:
+            parts = arg.split('+')
+            if len(parts) == 2 and self._is_register(parts[0].strip()):
+                base = parts[0].strip()
+                offset_str = parts[1].strip()
+                offset = 0
+                try:
+                    if offset_str.startswith('0x'):
+                        offset = int(offset_str, 16)
+                    else:
+                        offset = int(offset_str)
+                except ValueError:
+                    pass
+                return ConstraintOperand(kind='memory', value=base.lower(), offset=offset)
+        raise ParseError(f"Unknown memory operand: {arg}")
+
     def tokenize(self, expr: str) -> list[str]:
         tokens = []
         current = ""
@@ -227,7 +302,11 @@ class ConstraintParser:
         for ch in expr:
             if ch == '[':
                 if current.strip():
-                    tokens.append(current.strip())
+                    stripped = current.strip()
+                    if stripped.endswith('('):
+                        tokens.append(stripped[:-1])
+                    else:
+                        tokens.append(stripped)
                     current = ""
                 current += ch
                 in_brackets = True
@@ -236,6 +315,16 @@ class ConstraintParser:
                 tokens.append(current.strip())
                 current = ""
                 in_brackets = False
+            elif ch in '+-' and in_brackets:
+                if current.strip():
+                    tokens.append(current.strip())
+                tokens.append(ch)
+                current = ""
+            elif ch == ')' and not in_brackets:
+                if current.strip():
+                    tokens.append(current.strip())
+                    current = ""
+                tokens.append(ch)
             elif ch in ' \t' and not in_brackets:
                 if current.strip():
                     tokens.append(current.strip())

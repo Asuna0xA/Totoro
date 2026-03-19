@@ -127,18 +127,12 @@ class GadgetLifter:
             if effect:
                 effects.append(effect)
 
-            if insn.mnemonic in ('push', 'call'):
+            if insn.mnemonic == 'push':
                 stack_delta -= 8
             elif insn.mnemonic == 'pop':
                 stack_delta += 8
             elif insn.mnemonic == 'ret':
-                try:
-                    if insn.operands and len(insn.operands) > 0:
-                        stack_delta += 8
-                    else:
-                        stack_delta += 8
-                except:
-                    stack_delta += 8
+                pass
             elif insn.mnemonic in ('sub', 'add'):
                 try:
                     ops = insn.op_str.split(',')
@@ -186,11 +180,21 @@ class GadgetLifter:
     def _analyze_register_operands(self, insn, regs_read: Set[str], regs_write: Set[str]):
         if hasattr(insn, 'regs_read') and insn.regs_read:
             for r in insn.regs_read:
-                regs_read.add(r.name.lower())
+                if isinstance(r, int):
+                    reg_name = self._cs.reg_name(capstone.CS_ARCH_X86, r)
+                    if reg_name:
+                        regs_read.add(reg_name.lower())
+                elif hasattr(r, 'name'):
+                    regs_read.add(r.name.lower())
 
         if hasattr(insn, 'regs_write') and insn.regs_write:
             for r in insn.regs_write:
-                regs_write.add(r.name.lower())
+                if isinstance(r, int):
+                    reg_name = self._cs.reg_name(capstone.CS_ARCH_X86, r)
+                    if reg_name:
+                        regs_write.add(reg_name.lower())
+                elif hasattr(r, 'name'):
+                    regs_write.add(r.name.lower())
 
         op_str = insn.op_str.lower()
         all_regs = ['rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
@@ -203,9 +207,17 @@ class GadgetLifter:
             if reg in op_str:
                 base = self._normalize_register(reg)
                 if base:
-                    if insn.mnemonic in ('mov', 'lea', 'pop', 'xchg'):
+                    read_write_instrs = ('mov', 'lea', 'pop', 'xchg')
+                    read_only_write_instrs = ('add', 'sub', 'and', 'or', 'xor')
+                    if insn.mnemonic in read_write_instrs:
                         if '=' in insn.op_str or reg in insn.op_str.split(',')[0].lower():
                             regs_write.add(base)
+                        else:
+                            regs_read.add(base)
+                    elif insn.mnemonic in read_only_write_instrs:
+                        if reg in insn.op_str.split(',')[0].lower():
+                            regs_write.add(base)
+                            regs_read.add(base)
                         else:
                             regs_read.add(base)
                     else:
@@ -245,10 +257,28 @@ class GadgetLifter:
                 dst = parts[0].strip().lower()
                 src = parts[1].strip()
                 dst = self._normalize_register(dst) or dst
-                match = re.match(r'([a-z0-9]+)\+?([0-9]*)\(([^)]+)\)', src)
-                if match:
-                    base = match.group(3).lower()
-                    offset = int(match.group(2)) if match.group(2) else 0
+                if src.startswith('[') and src.endswith(']'):
+                    inner = src[1:-1].strip()
+                    if '+' in inner:
+                        inner_parts = inner.split('+')
+                        base = inner_parts[0].strip().lower()
+                        offset_str = inner_parts[1].strip() if len(inner_parts) > 1 else '0'
+                    elif '-' in inner:
+                        inner_parts = inner.split('-')
+                        base = inner_parts[0].strip().lower()
+                        offset_str = '-' + inner_parts[1].strip()
+                    else:
+                        base = inner.lower()
+                        offset_str = '0'
+                    try:
+                        if offset_str.startswith('0x'):
+                            offset = int(offset_str, 16)
+                        elif offset_str.startswith('-0x'):
+                            offset = -int(offset_str[3:], 16)
+                        else:
+                            offset = int(offset_str)
+                    except ValueError:
+                        offset = 0
                     return SemanticEffect(effect_type='lea', destination=dst, source=base, offset=offset)
 
         elif mnemonic == 'add':
@@ -330,7 +360,7 @@ class GadgetSet:
         nop_byte = 0x90
         int3_byte = 0xcc
 
-        for i in range(len(data) - 1):
+        for i in range(len(data)):
             if data[i] == ret_byte:
                 for gadget_len in range(2, 20):
                     start = i - gadget_len + 1

@@ -24,7 +24,10 @@ class Synthesizer:
         
     def load_binary(self, binary_path: str):
         self.gadget_set = GadgetSet()
-        self.gadget_set.load_from_binary(binary_path)
+        try:
+            self.gadget_set.load_from_binary(binary_path)
+        except FileNotFoundError:
+            return 0
         return len(self.gadget_set)
         
     def synthesize(self, constraint_expr: str, max_gadgets: int = 10) -> Optional[SynthesizedChain]:
