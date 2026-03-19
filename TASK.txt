@@ -1,0 +1,12 @@
+Read SPEC.md in this directory. Then implement the Totoro MVP — a semantic ROP chain synthesizer using Python + z3. Start with the core synthesizer module and a CLI. The project should be runnable with `python -m totoro`.
+
+Build the MVP with these components:
+1. Core: `totoro/synthesizer.py` — Takes a constraint like `rax = read(rdi + 0x20) + 0x100` and uses z3 to find a matching gadget chain
+2. CLI: `totoro/cli.py` — `totoro <binary> "rax = read(rdi + 0x20) + 0x100"`  
+3. `totoro/__init__.py` — package init
+4. `totoro/gadget.py` — gadget representation and capstone lifting
+5. `totoro/engine.py` — z3 constraint solver
+6. `pyproject.toml` with dependencies: capstone, z3-solver, pwntools (optional)
+7. `README.md` with usage examples and the Totoro aesthetic
+
+Follow the SPEC.md concept. Use free model: opencode/big-pickle

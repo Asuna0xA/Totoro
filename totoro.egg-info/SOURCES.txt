@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+totoro/__init__.py
+totoro/cli.py
+totoro/engine.py
+totoro/gadget.py
+totoro/synthesizer.py
+totoro.egg-info/PKG-INFO
+totoro.egg-info/SOURCES.txt
+totoro.egg-info/dependency_links.txt
+totoro.egg-info/entry_points.txt
+totoro.egg-info/requires.txt
+totoro.egg-info/top_level.txt
