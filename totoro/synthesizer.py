@@ -76,12 +76,16 @@ class Synthesizer:
         elif op == 'add' and 'add' in sem:
             sem_dst, sem_src = sem['add']
             if sem_dst == dst:
-                if (sem_src == src or (src in self.engine.regs and 
-                                       self._regs_match(sem_src, src))) and imm:
-                    if self._imms_compatible(sem_src, imm):
+                if imm is not None:
+                    sem_imm = self.engine._parse_immediate(sem_src)
+                    if sem_imm is not None and sem_imm == imm:
                         chain.add_gadget(gadget)
                         self.engine.execute_gadget(gadget, [])
                         return True
+                elif src in self.engine.regs and self._regs_match(sem_src, src):
+                    chain.add_gadget(gadget)
+                    self.engine.execute_gadget(gadget, [])
+                    return True
                         
         elif op in ['read', 'write', 'call'] and 'lea' in sem:
             sem_dst, sem_src = sem['lea']
